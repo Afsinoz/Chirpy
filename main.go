@@ -1,14 +1,35 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"net/http"
+	"os"
+
+	"github.com/Afsinoz/Chirpy/internal/database"
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
 )
 
 func main() {
+	var apiCfg apiConfig
+
+	// Database Connection
+	godotenv.Load()
+
+	dbURL := os.Getenv("DB_URL")
+
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		fmt.Println(err)
+	}
+	dbQueries := database.New(db)
+
+	apiCfg.platform = "dev"
+	apiCfg.db = dbQueries
+
 	const port = "8080"
 	const filePathRoot = "./templates"
-	var apiCfg apiConfig
 	mux := http.NewServeMux()
 	// Handler
 
@@ -23,6 +44,9 @@ func main() {
 	mux.HandleFunc("POST /admin/reset", apiCfg.ResetNumberRequestHandler)
 
 	mux.HandleFunc("POST /api/validate_chirp", ChirpyValidationHandler)
+	mux.HandleFunc("POST /api/users", apiCfg.UserHandler)
+
+	mux.HandleFunc("POST /api/chirps", apiCfg.ChirpCreateHandler)
 
 	srv := &http.Server{
 		Addr:    ":" + port,
