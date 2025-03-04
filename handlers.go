@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/Afsinoz/Chirpy/internal/database"
+	"github.com/google/uuid"
 )
 
 func ReadinessHandler(w http.ResponseWriter, r *http.Request) {
@@ -88,26 +90,11 @@ func responseWithError(w http.ResponseWriter, code int, msg string, err error) {
 
 }
 
-func ChirpyValidationHandler(w http.ResponseWriter, r *http.Request) {
+func chirpyValidate(w http.ResponseWriter, chirp string) string {
 
-	type chirpyText struct {
-		Body string `json:"body"`
-	}
-	type returnValue struct {
-		CleanedBody string `json:"cleaned_body"`
-	}
-
-	decoder := json.NewDecoder(r.Body)
-	params := chirpyText{}
-	err := decoder.Decode(&params)
-	if err != nil {
-		responseWithError(w, http.StatusInternalServerError, "Couldn't decode parameters", err)
-		return
-	}
-
-	if len(params.Body) > 140 {
+	if len(chirp) > 140 {
 		responseWithError(w, 400, "Chirpy is too long!", nil)
-		return
+		return ""
 	}
 
 	s1 := "kerfuffle"
@@ -116,7 +103,7 @@ func ChirpyValidationHandler(w http.ResponseWriter, r *http.Request) {
 
 	newText := []string{}
 
-	splittedText := strings.Split(params.Body, " ")
+	splittedText := strings.Split(chirp, " ")
 	var wordCheck string
 	for _, word := range splittedText {
 		wordCheck = strings.ToLower(word)
@@ -126,11 +113,57 @@ func ChirpyValidationHandler(w http.ResponseWriter, r *http.Request) {
 			newText = append(newText, word)
 		}
 	}
-	newBody := strings.Join(newText, " ")
 
-	clndbdy := returnValue{
-		CleanedBody: newBody,
+	cleanChirp := strings.Join(newText, " ")
+	return cleanChirp
+
+}
+
+func (cfg *apiConfig) ChirpCreateHandler(w http.ResponseWriter, r *http.Request) {
+
+	type reqChirpy struct {
+		Body   string    `json:"body"`
+		UserID uuid.UUID `json:"user_id"`
 	}
-	responseWithJson(w, http.StatusOK, clndbdy)
+
+	decoder := json.NewDecoder(r.Body)
+	params := reqChirpy{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		responseWithError(w, http.StatusInternalServerError, "Couldn't decode parameters", err)
+		return
+	}
+
+	newBody := chirpyValidate(w, params.Body)
+
+	uuid_chirp := uuid.New()
+	currentTime := time.Now()
+
+
+
+	dbChirpy, err := cfg.db.CreateChirp(r.Context(), database.CreateChirpParams{
+		ID:        uuid_chirp,
+		UpdatedAt: currentTime,
+		Body:      newBody,
+		UserID:    uuid.NullUUID { 
+			UUID: params.UserID,
+			Valid: true,
+		},
+	})
+	if err != nil {
+		log.Printf("Error while creating chirpy: %s", err)
+		w.WriteHeader(500)
+		return
+	}
+
+	chirpy := Chirpy{
+		ID:        dbChirpy.ID,
+		CreatedAt: dbChirpy.CreatedAt,
+		UpdatedAt: dbChirpy.UpdatedAt,
+		Body:      dbChirpy.Body,
+		UserID:    dbChirpy.UserID.UUID,
+	}
+
+	responseWithJson(w, 201, chirpy)
 
 }

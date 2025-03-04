@@ -42,7 +42,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 }
 
 const deleteUsers = `-- name: DeleteUsers :exec
-TRUNCATE TABLE users
+TRUNCATE users CASCADE
 `
 
 func (q *Queries) DeleteUsers(ctx context.Context) error {

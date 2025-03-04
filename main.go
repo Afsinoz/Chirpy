@@ -43,7 +43,6 @@ func main() {
 	mux.HandleFunc("GET /admin/metrics", apiCfg.RequestHandler)
 	mux.HandleFunc("POST /admin/reset", apiCfg.ResetNumberRequestHandler)
 
-	mux.HandleFunc("POST /api/validate_chirp", ChirpyValidationHandler)
 	mux.HandleFunc("POST /api/users", apiCfg.UserHandler)
 
 	mux.HandleFunc("POST /api/chirps", apiCfg.ChirpCreateHandler)
