@@ -19,6 +19,8 @@ func main() {
 
 	dbURL := os.Getenv("DB_URL")
 
+	apiCfg.secret = os.Getenv("SECRET")
+
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		fmt.Println(err)
@@ -41,11 +43,18 @@ func main() {
 	mux.HandleFunc("GET /api/healthz", ReadinessHandler)
 
 	mux.HandleFunc("GET /admin/metrics", apiCfg.RequestHandler)
+
+	mux.HandleFunc("GET /api/chirps", apiCfg.ChirpsHandler)
+
+	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.GetChirpyByIDHandler)
+
 	mux.HandleFunc("POST /admin/reset", apiCfg.ResetNumberRequestHandler)
 
 	mux.HandleFunc("POST /api/users", apiCfg.UserHandler)
 
 	mux.HandleFunc("POST /api/chirps", apiCfg.ChirpCreateHandler)
+
+	mux.HandleFunc("POST /api/login", apiCfg.LoginHandler)
 
 	srv := &http.Server{
 		Addr:    ":" + port,
@@ -55,7 +64,7 @@ func main() {
 	fmt.Println("Address", srv.Addr)
 
 	if err := srv.ListenAndServe(); err != nil {
-		fmt.Errorf("Error of ListenAndServer", err)
+		fmt.Errorf("Error of ListenAndServer: %s", err)
 	}
 
 }

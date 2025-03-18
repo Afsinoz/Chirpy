@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Afsinoz/Chirpy/internal/auth"
 	"github.com/Afsinoz/Chirpy/internal/database"
 	"github.com/google/uuid"
 )
@@ -28,6 +29,7 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 	db             *database.Queries
 	platform       string
+	secret         string
 }
 
 func (cfg *apiConfig) MiddlewareMetricsInc(next http.Handler) http.Handler {
@@ -121,6 +123,20 @@ func chirpyValidate(w http.ResponseWriter, chirp string) string {
 
 func (cfg *apiConfig) ChirpCreateHandler(w http.ResponseWriter, r *http.Request) {
 
+	bearerToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		msg := fmt.Sprintf("Invalid token error, couldn't get the token: %s", err)
+		responseWithError(w, 500, msg, err)
+		return
+	}
+
+	reqUserID, err := auth.ValidateJWT(bearerToken, cfg.secret)
+	if err != nil {
+		msg := fmt.Sprintf("Unauthorized user: %s, error: %s", reqUserID, err)
+		responseWithError(w, 401, msg, err)
+		return
+	}
+
 	type reqChirpy struct {
 		Body   string    `json:"body"`
 		UserID uuid.UUID `json:"user_id"`
@@ -128,7 +144,7 @@ func (cfg *apiConfig) ChirpCreateHandler(w http.ResponseWriter, r *http.Request)
 
 	decoder := json.NewDecoder(r.Body)
 	params := reqChirpy{}
-	err := decoder.Decode(&params)
+	err = decoder.Decode(&params)
 	if err != nil {
 		responseWithError(w, http.StatusInternalServerError, "Couldn't decode parameters", err)
 		return
@@ -139,17 +155,14 @@ func (cfg *apiConfig) ChirpCreateHandler(w http.ResponseWriter, r *http.Request)
 	uuid_chirp := uuid.New()
 	currentTime := time.Now()
 
-
-
 	dbChirpy, err := cfg.db.CreateChirp(r.Context(), database.CreateChirpParams{
 		ID:        uuid_chirp,
 		UpdatedAt: currentTime,
 		Body:      newBody,
-		UserID:    uuid.NullUUID { 
-			UUID: params.UserID,
+		UserID: uuid.NullUUID{
+			UUID:  reqUserID,
 			Valid: true,
-		},
-	})
+		}})
 	if err != nil {
 		log.Printf("Error while creating chirpy: %s", err)
 		w.WriteHeader(500)
@@ -165,5 +178,61 @@ func (cfg *apiConfig) ChirpCreateHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	responseWithJson(w, 201, chirpy)
+
+}
+
+func (cfg *apiConfig) LoginHandler(w http.ResponseWriter, r *http.Request) {
+
+	type parameters struct {
+		Password         string `json:"password"`
+		Email            string `json:"email"`
+		ExpiresInSeconds *int   `json:"expires_in_seconds"` // * means it is optional
+	}
+
+	var defaultExpInSeconds int = 3600
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		msg := fmt.Sprintf("Decoding error happens during the login: %s", err)
+		responseWithError(w, 500, msg, err)
+		return
+	}
+	if params.ExpiresInSeconds == nil {
+		params.ExpiresInSeconds = &defaultExpInSeconds
+	} else if *params.ExpiresInSeconds > 3600 {
+		params.ExpiresInSeconds = &defaultExpInSeconds
+	}
+
+	dbUser, err := cfg.db.GetUser(r.Context(), params.Email)
+	if err != nil {
+		msg := fmt.Sprintf("Get user error %s", err)
+		responseWithError(w, 500, msg, err)
+		return
+	}
+	// Get JWT token
+	token, err := auth.MakeJWT(dbUser.ID, cfg.secret, time.Duration(*params.ExpiresInSeconds)*time.Second)
+	if err != nil {
+		msg := fmt.Sprintf("Couldn't create JWT, token signing error: %s", err)
+		responseWithError(w, 500, msg, err)
+		return
+	}
+	user := User{
+		ID:        dbUser.ID,
+		CreatedAt: dbUser.CreatedAt,
+		UpdatedAt: dbUser.UpdatedAt,
+		Email:     dbUser.Email,
+		//		HashedPassword: dbUser.HashedPassword,
+		ExpiresInSeconds: params.ExpiresInSeconds,
+		Token:            token,
+	}
+
+	if err := auth.CheckPasswordHash(params.Password, dbUser.HashedPassword); err != nil {
+		msg := fmt.Sprintf("Unauthorized")
+		responseWithError(w, 401, msg, err)
+		return
+	}
+	responseWithJson(w, 200, user)
 
 }
