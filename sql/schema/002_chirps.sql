@@ -1,3 +1,4 @@
+
 -- +goose Up
 CREATE TABLE chirps (
     id UUID PRIMARY KEY,

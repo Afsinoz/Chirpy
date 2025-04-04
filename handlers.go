@@ -184,9 +184,8 @@ func (cfg *apiConfig) ChirpCreateHandler(w http.ResponseWriter, r *http.Request)
 func (cfg *apiConfig) LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 	type parameters struct {
-		Password         string `json:"password"`
-		Email            string `json:"email"`
-		ExpiresInSeconds *int   `json:"expires_in_seconds"` // * means it is optional
+		Password string `json:"password"`
+		Email    string `json:"email"`
 	}
 
 	var defaultExpInSeconds int = 3600
@@ -199,11 +198,6 @@ func (cfg *apiConfig) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		responseWithError(w, 500, msg, err)
 		return
 	}
-	if params.ExpiresInSeconds == nil {
-		params.ExpiresInSeconds = &defaultExpInSeconds
-	} else if *params.ExpiresInSeconds > 3600 {
-		params.ExpiresInSeconds = &defaultExpInSeconds
-	}
 
 	dbUser, err := cfg.db.GetUser(r.Context(), params.Email)
 	if err != nil {
@@ -211,8 +205,31 @@ func (cfg *apiConfig) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		responseWithError(w, 500, msg, err)
 		return
 	}
+
+	// Get RefreshToken
+	refreshToken, err := auth.MakeRefreshToken()
+	if err != nil {
+		msg := fmt.Sprintf("Couldn't return refreshtoken, error: %s", err)
+		responseWithError(w, 500, msg, err)
+		return
+	}
+
+	dbRefToken, err := cfg.db.CreateRefToken(r.Context(), database.CreateRefTokenParams{
+		Token: refreshToken,
+		UserID: uuid.NullUUID{
+			UUID:  dbUser.ID,
+			Valid: true,
+		},
+	})
+
+	if err != nil {
+		msg := fmt.Sprintf("Couldn't create Refresh Token, error: %s", err)
+		responseWithError(w, 500, msg, err)
+		return
+	}
+
 	// Get JWT token
-	token, err := auth.MakeJWT(dbUser.ID, cfg.secret, time.Duration(*params.ExpiresInSeconds)*time.Second)
+	token, err := auth.MakeJWT(dbUser.ID, cfg.secret, time.Duration(defaultExpInSeconds)*time.Second)
 	if err != nil {
 		msg := fmt.Sprintf("Couldn't create JWT, token signing error: %s", err)
 		responseWithError(w, 500, msg, err)
@@ -224,15 +241,22 @@ func (cfg *apiConfig) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt: dbUser.UpdatedAt,
 		Email:     dbUser.Email,
 		//		HashedPassword: dbUser.HashedPassword,
-		ExpiresInSeconds: params.ExpiresInSeconds,
-		Token:            token,
+		Token:        token,
+		RefreshToken: dbRefToken.Token,
 	}
 
 	if err := auth.CheckPasswordHash(params.Password, dbUser.HashedPassword); err != nil {
+
 		msg := fmt.Sprintf("Unauthorized")
+
 		responseWithError(w, 401, msg, err)
 		return
 	}
 	responseWithJson(w, 200, user)
+
+}
+
+func (cfg *apiConfig) RefreshHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header()
 
 }
