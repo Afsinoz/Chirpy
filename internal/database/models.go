@@ -5,6 +5,7 @@
 package database
 
 import (
+	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,7 +24,7 @@ type RefreshToken struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	ExpiresAt time.Time
-	RevokedAt time.Time
+	RevokedAt sql.NullTime
 	UserID    uuid.NullUUID
 }
 

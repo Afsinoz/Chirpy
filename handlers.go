@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -257,6 +258,74 @@ func (cfg *apiConfig) LoginHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) RefreshHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header()
+
+	type token struct {
+		Token string `json:"token"`
+	}
+
+	var defaultExpInSeconds int = 3600
+
+	tokenString, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		msg := fmt.Sprintf("Couldn't get the token from header: %s", err)
+		responseWithError(w, http.StatusUnauthorized, msg, err)
+		return
+	}
+
+	refreshToken, err := cfg.db.GetUserFromRefreshToken(r.Context(), tokenString)
+	if err != nil {
+		msg := fmt.Sprintf("Token is not Exits: %s", err)
+		responseWithError(w, http.StatusUnauthorized, msg, err)
+		return
+	}
+
+	if time.Now().After(refreshToken.ExpiresAt) {
+		err := fmt.Errorf("token expired")
+		msg := fmt.Sprintf("Token is not valid: %s", err)
+		responseWithError(w, http.StatusUnauthorized, msg, err)
+		return
+
+	}
+
+	if refreshToken.RevokedAt.Valid {
+		err := fmt.Errorf("token revoked")
+		msg := fmt.Sprintf("Token is revoked: %s", err)
+		responseWithError(w, http.StatusUnauthorized, msg, err)
+		return
+	}
+	newAccessToken, err := auth.MakeJWT(refreshToken.UserID.UUID, cfg.secret, time.Duration(defaultExpInSeconds)*time.Second)
+	if err != nil {
+		msg := fmt.Sprintf("Couldn't create JWT, token signing error: %s", err)
+		responseWithError(w, 500, msg, err)
+		return
+	}
+	new_token := token{Token: newAccessToken}
+
+	responseWithJson(w, 200, new_token)
+
+}
+
+func (cfg *apiConfig) RevokeTokenHandler(w http.ResponseWriter, r *http.Request) {
+	tokenString, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		msg := fmt.Sprintf("Couldn't get the token from header: %s", err)
+		responseWithError(w, http.StatusUnauthorized, msg, err)
+		return
+	}
+
+	now := time.Now().UTC()
+
+	err = cfg.db.RevokeRefToken(r.Context(), database.RevokeRefTokenParams{
+		RevokedAt: sql.NullTime{Time: now, Valid: true},
+		UpdatedAt: now,
+		Token:     tokenString,
+	})
+
+	if err != nil {
+		msg := fmt.Sprintf("Couldn't revoke refresh token: %s", err)
+		responseWithError(w, 500, msg, err)
+	}
+
+	w.WriteHeader(204)
 
 }

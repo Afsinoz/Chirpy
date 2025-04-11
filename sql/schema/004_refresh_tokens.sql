@@ -4,9 +4,9 @@ CREATE TABLE refresh_tokens(
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL,
     expires_at TIMESTAMP NOT NULL,
-    revoked_at TIMESTAMP NOT NULL DEFAULT NULL,
+    revoked_at TIMESTAMP DEFAULT NULL,
     user_id UUID REFERENCES users(id) ON DELETE CASCADE
 );
 
 -- +goose Down
-DELETE TABLE refresh_tokens;
+DROP TABLE refresh_tokens;
