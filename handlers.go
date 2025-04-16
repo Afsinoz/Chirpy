@@ -329,3 +329,57 @@ func (cfg *apiConfig) RevokeTokenHandler(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(204)
 
 }
+
+func (cfg *apiConfig) UpdateUserHandler(w http.ResponseWriter, r *http.Request) {
+	reqUserID, httpExceptionCode, msg, err := GetUser(r, cfg.secret)
+	if err != nil {
+		responseWithError(w, httpExceptionCode, msg, err)
+		return
+	}
+
+	type parameters struct {
+		Password string `json:"password"`
+		Email    string `json:"email"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err = decoder.Decode(&params)
+	if err != nil {
+		msg := fmt.Sprintf("Decoding error happens during the update of email and password: %s", err)
+		responseWithError(w, 500, msg, err)
+		return
+	}
+
+	HashedPasswordNew, err := auth.HashPassword(params.Password)
+	if err != nil {
+		msg := fmt.Sprintf("Hashing problem, %s", err)
+		responseWithError(w, 500, msg, err)
+		return
+	}
+	currentTime := time.Now()
+
+	err = cfg.db.UpdateUser(r.Context(), database.UpdateUserParams{
+		Email:          params.Email,
+		HashedPassword: HashedPasswordNew,
+		UpdatedAt:      currentTime,
+		ID:             reqUserID,
+	})
+	if err != nil {
+		msg := fmt.Sprintf("Updating database issue: %s", err)
+		responseWithError(w, 500, msg, err)
+		return
+	}
+
+	dbUser, err := cfg.db.GetUser(r.Context(), params.Email)
+	user := User{
+		ID:        dbUser.ID,
+		CreatedAt: dbUser.CreatedAt,
+		UpdatedAt: dbUser.UpdatedAt,
+		Email:     dbUser.Email,
+		//		HashedPassword: dbUser.HashedPassword,
+	}
+
+	responseWithJson(w, 200, user)
+
+}
