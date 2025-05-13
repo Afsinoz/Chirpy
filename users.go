@@ -17,9 +17,10 @@ type User struct {
 	HashedPassword string    `json:"-"`
 	Token          string    `json:"token"`
 	RefreshToken   string    `json:"refresh_token"`
+	IsChirpyRed    bool      `json:"is_chirpy_red"`
 }
 
-func GetUser(r *http.Request, secret string) (uuid.UUID, int, string, error) {
+func GetUserFromJWT(r *http.Request, secret string) (uuid.UUID, int, string, error) {
 	bearerToken, err := auth.GetBearerToken(r.Header)
 	if err != nil {
 		msg := fmt.Sprintf("Invalid token error, couldn't get the token: %s", err)
@@ -33,5 +34,4 @@ func GetUser(r *http.Request, secret string) (uuid.UUID, int, string, error) {
 	}
 
 	return reqUserID, 0, "", nil
-
 }

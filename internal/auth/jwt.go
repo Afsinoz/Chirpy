@@ -10,8 +10,7 @@ import (
 	"github.com/google/uuid"
 )
 
-//TODO, uuid.UUID should change with uuid.NullUUID.UUID, bc of the uuid package
-
+// TODO, uuid.UUID should change with uuid.NullUUID.UUID, bc of the uuid package
 func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (string, error) {
 	now := time.Now().UTC()
 	claims := &jwt.RegisteredClaims{
@@ -27,7 +26,6 @@ func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (str
 		return "", nil
 	}
 	return signedToken, nil
-
 }
 
 func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {

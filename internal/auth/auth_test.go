@@ -55,7 +55,6 @@ func TestMakeJWT(t *testing.T) {
 			}
 		})
 	}
-
 }
 
 func TestValidateJWT(t *testing.T) {
@@ -122,5 +121,4 @@ func TestValidateJWT(t *testing.T) {
 			}
 		})
 	}
-
 }

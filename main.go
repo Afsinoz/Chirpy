@@ -19,6 +19,8 @@ func main() {
 
 	dbURL := os.Getenv("DB_URL")
 
+	apiCfg.polkaKey = os.Getenv("POLKA_KEY")
+
 	apiCfg.secret = os.Getenv("SECRET")
 
 	db, err := sql.Open("postgres", dbURL)
@@ -33,8 +35,8 @@ func main() {
 	const port = "8080"
 	const filePathRoot = "./templates"
 	mux := http.NewServeMux()
+	apiCfg.secret = os.Getenv("SECRET")
 	// Handler
-
 	strpr := http.StripPrefix("/app/", http.FileServer(http.Dir(filePathRoot)))
 
 	mux.Handle("/app/", apiCfg.MiddlewareMetricsInc(strpr))
@@ -62,6 +64,10 @@ func main() {
 
 	mux.HandleFunc("PUT /api/users", apiCfg.UpdateUserHandler)
 
+	mux.HandleFunc("DELETE /api/chirps/{chirpID}", apiCfg.DeleteChirpHandler)
+
+	mux.HandleFunc("POST /api/polka/webhooks", apiCfg.PolkaHandler)
+
 	srv := &http.Server{
 		Addr:    ":" + port,
 		Handler: mux,
@@ -70,7 +76,6 @@ func main() {
 	fmt.Println("Address", srv.Addr)
 
 	if err := srv.ListenAndServe(); err != nil {
-		fmt.Errorf("Error of ListenAndServer: %s", err)
+		fmt.Printf("Error of ListenAndServer: %s", err)
 	}
-
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -16,13 +17,11 @@ import (
 )
 
 func ReadinessHandler(w http.ResponseWriter, r *http.Request) {
-
 	w.Header().Set("contentType", "text/plain; charset=utf-8")
 
 	w.WriteHeader(http.StatusOK)
 
 	w.Write([]byte("OK, ready!"))
-
 }
 
 // API CONFIG
@@ -31,6 +30,7 @@ type apiConfig struct {
 	db             *database.Queries
 	platform       string
 	secret         string
+	polkaKey       string
 }
 
 func (cfg *apiConfig) MiddlewareMetricsInc(next http.Handler) http.Handler {
@@ -90,11 +90,9 @@ func responseWithError(w http.ResponseWriter, code int, msg string, err error) {
 	}
 
 	responseWithJson(w, code, errorResponse{Err: msg})
-
 }
 
 func chirpyValidate(w http.ResponseWriter, chirp string) string {
-
 	if len(chirp) > 140 {
 		responseWithError(w, 400, "Chirpy is too long!", nil)
 		return ""
@@ -119,11 +117,9 @@ func chirpyValidate(w http.ResponseWriter, chirp string) string {
 
 	cleanChirp := strings.Join(newText, " ")
 	return cleanChirp
-
 }
 
 func (cfg *apiConfig) ChirpCreateHandler(w http.ResponseWriter, r *http.Request) {
-
 	bearerToken, err := auth.GetBearerToken(r.Header)
 	if err != nil {
 		msg := fmt.Sprintf("Invalid token error, couldn't get the token: %s", err)
@@ -163,7 +159,8 @@ func (cfg *apiConfig) ChirpCreateHandler(w http.ResponseWriter, r *http.Request)
 		UserID: uuid.NullUUID{
 			UUID:  reqUserID,
 			Valid: true,
-		}})
+		},
+	})
 	if err != nil {
 		log.Printf("Error while creating chirpy: %s", err)
 		w.WriteHeader(500)
@@ -179,17 +176,15 @@ func (cfg *apiConfig) ChirpCreateHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	responseWithJson(w, 201, chirpy)
-
 }
 
 func (cfg *apiConfig) LoginHandler(w http.ResponseWriter, r *http.Request) {
-
 	type parameters struct {
 		Password string `json:"password"`
 		Email    string `json:"email"`
 	}
 
-	var defaultExpInSeconds int = 3600
+	defaultExpInSeconds := 3600
 
 	decoder := json.NewDecoder(r.Body)
 	params := parameters{}
@@ -222,7 +217,6 @@ func (cfg *apiConfig) LoginHandler(w http.ResponseWriter, r *http.Request) {
 			Valid: true,
 		},
 	})
-
 	if err != nil {
 		msg := fmt.Sprintf("Couldn't create Refresh Token, error: %s", err)
 		responseWithError(w, 500, msg, err)
@@ -244,6 +238,7 @@ func (cfg *apiConfig) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		//		HashedPassword: dbUser.HashedPassword,
 		Token:        token,
 		RefreshToken: dbRefToken.Token,
+		IsChirpyRed:  dbUser.IsChirpyRed,
 	}
 
 	if err := auth.CheckPasswordHash(params.Password, dbUser.HashedPassword); err != nil {
@@ -254,11 +249,9 @@ func (cfg *apiConfig) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	responseWithJson(w, 200, user)
-
 }
 
 func (cfg *apiConfig) RefreshHandler(w http.ResponseWriter, r *http.Request) {
-
 	type token struct {
 		Token string `json:"token"`
 	}
@@ -302,7 +295,6 @@ func (cfg *apiConfig) RefreshHandler(w http.ResponseWriter, r *http.Request) {
 	new_token := token{Token: newAccessToken}
 
 	responseWithJson(w, 200, new_token)
-
 }
 
 func (cfg *apiConfig) RevokeTokenHandler(w http.ResponseWriter, r *http.Request) {
@@ -320,18 +312,16 @@ func (cfg *apiConfig) RevokeTokenHandler(w http.ResponseWriter, r *http.Request)
 		UpdatedAt: now,
 		Token:     tokenString,
 	})
-
 	if err != nil {
 		msg := fmt.Sprintf("Couldn't revoke refresh token: %s", err)
 		responseWithError(w, 500, msg, err)
 	}
 
 	w.WriteHeader(204)
-
 }
 
 func (cfg *apiConfig) UpdateUserHandler(w http.ResponseWriter, r *http.Request) {
-	reqUserID, httpExceptionCode, msg, err := GetUser(r, cfg.secret)
+	reqUserID, httpExceptionCode, msg, err := GetUserFromJWT(r, cfg.secret)
 	if err != nil {
 		responseWithError(w, httpExceptionCode, msg, err)
 		return
@@ -372,14 +362,114 @@ func (cfg *apiConfig) UpdateUserHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	dbUser, err := cfg.db.GetUser(r.Context(), params.Email)
+	if err != nil {
+		msg := fmt.Sprintf("Getting user issue database: %s", err)
+		responseWithError(w, 500, msg, err)
+	}
 	user := User{
-		ID:        dbUser.ID,
-		CreatedAt: dbUser.CreatedAt,
-		UpdatedAt: dbUser.UpdatedAt,
-		Email:     dbUser.Email,
+		ID:          dbUser.ID,
+		CreatedAt:   dbUser.CreatedAt,
+		UpdatedAt:   dbUser.UpdatedAt,
+		Email:       dbUser.Email,
+		IsChirpyRed: dbUser.IsChirpyRed,
 		//		HashedPassword: dbUser.HashedPassword,
 	}
 
 	responseWithJson(w, 200, user)
+}
 
+func (cfg *apiConfig) DeleteChirpHandler(w http.ResponseWriter, r *http.Request) {
+	reqUserID, httpExceptionCode, msg, err := GetUserFromJWT(r, cfg.secret)
+	if err != nil {
+		responseWithError(w, httpExceptionCode, msg, err)
+		return
+	}
+
+	chirpIDStr := r.PathValue("chirpID")
+
+	chirpID, err := uuid.Parse(chirpIDStr)
+	if err != nil {
+		// Handle invalid UUID format
+		http.Error(w, "Invalid chirp ID format", http.StatusBadRequest)
+		return
+	}
+
+	dbchirp, err := cfg.db.GetChirp(r.Context(), chirpID)
+	if err != nil {
+		msg := fmt.Sprintf("Chirpy not found, db error: %s", err)
+		responseWithError(w, 404, msg, err)
+		return
+	}
+
+	if reqUserID != dbchirp.UserID.UUID {
+		err := fmt.Errorf("no authorization")
+		msg := fmt.Sprintf("Not authorized for deleting this chirp: %s", err)
+		responseWithError(w, 403, msg, err)
+		return
+	}
+
+	err = cfg.db.DeleteChirp(r.Context(), chirpID)
+	if err != nil {
+		msg := fmt.Sprintf("Deleting from db error: %s", err)
+		responseWithError(w, 500, msg, err)
+		return
+	}
+
+	w.WriteHeader(204)
+}
+
+func (cfg *apiConfig) PolkaHandler(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Event string `json:"event"`
+		Data  struct {
+			UserID string `json:"user_id"`
+		} `json:"data"`
+	}
+
+	headerAPIKey, err := auth.GetAPIKey(r.Header)
+	if err != nil {
+		msg := fmt.Sprintf("cannot get the apikey: %s", err)
+		responseWithError(w, 401, msg, err)
+		return
+	}
+
+	if cfg.polkaKey != headerAPIKey {
+		msg := fmt.Sprintf("wrong api key")
+		err := errors.New("api key mistake")
+		responseWithError(w, 401, msg, err)
+		return
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err = decoder.Decode(&params)
+	if err != nil {
+		msg := fmt.Sprintf("Decoding error occurs during the Polka process: %s", err)
+		responseWithError(w, 500, msg, err)
+		return
+	}
+
+	reqUserID := params.Data.UserID
+	userId, err := uuid.Parse(reqUserID)
+	if err != nil {
+		http.Error(w, "Invalid User ID format", http.StatusBadRequest)
+		return
+
+	}
+
+	if params.Event != "user.upgraded" {
+		w.WriteHeader(204)
+		return
+	} else {
+		err := cfg.db.UpdateRedChirpyUser(r.Context(), userId)
+		if err != nil {
+			msg := fmt.Sprintf("Cannot update the red chirpy user: %s", err)
+			responseWithError(w, 404, msg, err)
+			return
+
+		}
+		w.WriteHeader(204)
+		return
+
+	}
 }

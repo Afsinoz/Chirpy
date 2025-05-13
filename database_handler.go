@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/Afsinoz/Chirpy/internal/auth"
@@ -54,14 +55,60 @@ func (cfg *apiConfig) UserHandler(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:      dbUser.UpdatedAt,
 		Email:          dbUser.Email,
 		HashedPassword: HashedPassword,
+		IsChirpyRed:    dbUser.IsChirpyRed,
 	}
 
 	responseWithJson(w, 201, user)
-
 }
 
 func (cfg *apiConfig) ChirpsHandler(w http.ResponseWriter, r *http.Request) {
-	dbChirps, err := cfg.db.GetChirps(r.Context())
+	authorID := r.URL.Query().Get("author_id")
+
+	sort_query := r.URL.Query().Get("sort")
+
+	if len(authorID) == 0 {
+		dbChirps, err := cfg.db.GetChirps(r.Context())
+		if err != nil {
+			msg := fmt.Sprintf("Error getting the list of chirps: %s", err)
+			responseWithError(w, 500, msg, err)
+			return
+		}
+
+		var responseChirps []Chirpy
+
+		for _, chirp := range dbChirps {
+			newChirpy := Chirpy{
+				ID:        chirp.ID,
+				CreatedAt: chirp.CreatedAt,
+				UpdatedAt: chirp.UpdatedAt,
+				Body:      chirp.Body,
+				UserID:    chirp.UserID.UUID,
+			}
+			responseChirps = append(responseChirps, newChirpy)
+		}
+		if sort_query == "desc" {
+			sort.Slice(responseChirps, func(i, j int) bool {
+				return responseChirps[j].CreatedAt.Before(responseChirps[i].CreatedAt)
+			})
+			responseWithJson(w, 200, responseChirps)
+			return
+		}
+
+		responseWithJson(w, 200, responseChirps)
+		return
+	}
+	fmt.Println("HERE IS THE AUTHOR GETTING CHIRpy")
+	authorUUID, err := uuid.Parse(authorID)
+	if err != nil {
+		responseWithError(w, 500, "uuid Parsing error", err)
+		return
+	}
+
+	dbChirps, err := cfg.db.GetAuthorChirps(r.Context(),
+		uuid.NullUUID{
+			UUID:  authorUUID,
+			Valid: true,
+		})
 	if err != nil {
 		msg := fmt.Sprintf("Error getting the list of chirps: %s", err)
 		responseWithError(w, 500, msg, err)
@@ -80,8 +127,17 @@ func (cfg *apiConfig) ChirpsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		responseChirps = append(responseChirps, newChirpy)
 	}
-	responseWithJson(w, 200, responseChirps)
 
+	if sort_query == "desc" {
+		sort.Slice(responseChirps, func(i, j int) bool {
+			return responseChirps[j].CreatedAt.Before(responseChirps[i].CreatedAt)
+		})
+		responseWithJson(w, 200, responseChirps)
+		return
+	} else {
+		responseWithJson(w, 200, responseChirps)
+		return
+	}
 }
 
 func (cfg *apiConfig) GetChirpyByIDHandler(w http.ResponseWriter, r *http.Request) {
